@@ -1,0 +1,66 @@
+name: Await Live Version
+description: Wait until a health endpoint reports the expected live version.
+inputs:
+  health-url:
+    description: Health endpoint URL.
+    required: true
+  expected-version:
+    description: Version expected from the health endpoint.
+    required: true
+  version-field:
+    description: JSON field containing the live version.
+    required: false
+    default: version
+  attempts:
+    description: Number of polling attempts.
+    required: false
+    default: "90"
+  interval-seconds:
+    description: Delay between attempts.
+    required: false
+    default: "2"
+outputs:
+  duration_seconds:
+    description: Verification duration in seconds.
+    value: ${{ steps.wait.outputs.duration_seconds }}
+  live_version:
+    description: Version reported by the live application.
+    value: ${{ steps.wait.outputs.live_version }}
+runs:
+  using: composite
+  steps:
+    - name: Await live version
+      id: wait
+      shell: bash
+      env:
+        HEALTH_URL: ${{ inputs.health-url }}
+        EXPECTED_VERSION: ${{ inputs.expected-version }}
+        VERSION_FIELD: ${{ inputs.version-field }}
+        ATTEMPTS: ${{ inputs.attempts }}
+        INTERVAL_SECONDS: ${{ inputs.interval-seconds }}
+      run: |
+        started_at="$(date +%s)"
+        last_version=""
+
+        for attempt in $(seq 1 "${ATTEMPTS}"); do
+          response="$(curl -fsS "${HEALTH_URL}" || true)"
+          version="$(printf '%s' "${response}" | python3 -c 'import json, os, sys; print(json.load(sys.stdin).get(os.environ["VERSION_FIELD"], ""))' 2>/dev/null || true)"
+          last_version="${version}"
+
+          if [ "${version}" = "${EXPECTED_VERSION}" ]; then
+            finished_at="$(date +%s)"
+            echo "Live version is ${version}"
+            echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+            echo "live_version=${version}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "Attempt ${attempt}/${ATTEMPTS}: live '${version:-unknown}', want '${EXPECTED_VERSION}'"
+          sleep "${INTERVAL_SECONDS}"
+        done
+
+        finished_at="$(date +%s)"
+        echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+        echo "live_version=${last_version}" >> "${GITHUB_OUTPUT}"
+        echo "Timed out waiting for ${HEALTH_URL} to report ${EXPECTED_VERSION}"
+        exit 1

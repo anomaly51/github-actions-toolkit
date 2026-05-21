@@ -1,0 +1,177 @@
+name: Deployment Manifest Update
+description: Update a Kubernetes deployment manifest in a GitOps repository.
+inputs:
+  repository:
+    description: GitOps repository in owner/name form.
+    required: true
+  branch:
+    description: GitOps branch to update.
+    required: false
+    default: main
+  repository-token:
+    description: Token with push access to the GitOps repository.
+    required: true
+  deployment-path:
+    description: Path to the Kubernetes deployment manifest inside the GitOps repository.
+    required: true
+  container-name:
+    description: Container name whose image should be updated. First image line is used when empty.
+    required: false
+    default: ""
+  image-ref:
+    description: Full container image reference.
+    required: true
+  image-tag:
+    description: Image tag to write into the version environment variable.
+    required: true
+  version-env-name:
+    description: Environment variable used by the application to report its live version.
+    required: false
+    default: APP_VERSION
+  env-updates:
+    description: JSON object with extra environment variables to set in the deployment.
+    required: false
+    default: "{}"
+  commit-message:
+    description: Commit message for the GitOps update.
+    required: true
+outputs:
+  commit:
+    description: Git commit created in the GitOps repository.
+    value: ${{ steps.update.outputs.commit }}
+  duration_seconds:
+    description: Update duration in seconds.
+    value: ${{ steps.update.outputs.duration_seconds }}
+runs:
+  using: composite
+  steps:
+    - name: Update manifest
+      id: update
+      shell: bash
+      env:
+        GITOPS_REPOSITORY: ${{ inputs.repository }}
+        GITOPS_BRANCH: ${{ inputs.branch }}
+        GITOPS_TOKEN: ${{ inputs.repository-token }}
+        DEPLOYMENT_PATH: ${{ inputs.deployment-path }}
+        CONTAINER_NAME: ${{ inputs.container-name }}
+        IMAGE_REF: ${{ inputs.image-ref }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        VERSION_ENV_NAME: ${{ inputs.version-env-name }}
+        ENV_UPDATES_JSON: ${{ inputs.env-updates }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+      run: |
+        started_at="$(date +%s)"
+        test -n "${GITOPS_TOKEN}"
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        workdir="$(mktemp -d)"
+        git clone --depth 1 --branch "${GITOPS_BRANCH}" \
+          "https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPOSITORY}.git" \
+          "${workdir}/gitops"
+
+        cd "${workdir}/gitops"
+        python3 - <<'PY'
+        from pathlib import Path
+        import json
+        import os
+        import re
+        import sys
+
+        path = Path(os.environ["DEPLOYMENT_PATH"])
+        container_name = os.environ.get("CONTAINER_NAME", "")
+        image_ref = os.environ["IMAGE_REF"]
+        image_tag = os.environ["IMAGE_TAG"]
+        version_env_name = os.environ.get("VERSION_ENV_NAME", "APP_VERSION")
+
+        try:
+            env_updates = json.loads(os.environ.get("ENV_UPDATES_JSON") or "{}")
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"env-updates is not valid JSON: {exc}") from exc
+        if not isinstance(env_updates, dict):
+            raise SystemExit("env-updates must be a JSON object")
+
+        old = path.read_text()
+        lines = old.splitlines()
+
+        def leading_spaces(line: str) -> int:
+            return len(line) - len(line.lstrip(" "))
+
+        def replace_image(lines: list[str]) -> tuple[list[str], bool]:
+            image_pattern = re.compile(r"^(\s*image:\s*).+$")
+            if not container_name:
+                for index, line in enumerate(lines):
+                    match = image_pattern.match(line)
+                    if match:
+                        lines[index] = f"{match.group(1)}{image_ref}"
+                        return lines, True
+                return lines, False
+
+            name_pattern = re.compile(rf"^(\s*)-\s+name:\s+{re.escape(container_name)}\s*$")
+            for index, line in enumerate(lines):
+                match = name_pattern.match(line)
+                if not match:
+                    continue
+                container_indent = len(match.group(1))
+                for image_index in range(index + 1, len(lines)):
+                    candidate = lines[image_index]
+                    if candidate.strip().startswith("- name:") and leading_spaces(candidate) <= container_indent:
+                        break
+                    image_match = image_pattern.match(candidate)
+                    if image_match:
+                        lines[image_index] = f"{image_match.group(1)}{image_ref}"
+                        return lines, True
+            return lines, False
+
+        def set_env_value(lines: list[str], name: str, value: str) -> list[str]:
+            for index, line in enumerate(lines):
+                if line.strip() != f"- name: {name}":
+                    continue
+                indent = line[: leading_spaces(line)]
+                value_line = f'{indent}  value: "{value}"'
+                if index + 1 < len(lines) and lines[index + 1].strip().startswith("value:"):
+                    lines[index + 1] = value_line
+                else:
+                    lines.insert(index + 1, value_line)
+                return lines
+
+            env_index = None
+            for index, line in enumerate(lines):
+                if line.strip() == "env:":
+                    env_index = index
+                    break
+            if env_index is None:
+                raise SystemExit(f"could not find env: block to insert {name}")
+
+            env_indent = lines[env_index][: leading_spaces(lines[env_index])]
+            item_indent = env_indent + "  "
+            value_indent = item_indent + "  "
+            lines.insert(env_index + 1, f"{item_indent}- name: {name}")
+            lines.insert(env_index + 2, f'{value_indent}value: "{value}"')
+            return lines
+
+        lines, image_updated = replace_image(lines)
+        if not image_updated:
+            target = f"container {container_name}" if container_name else "first image line"
+            raise SystemExit(f"could not update image for {target} in {path}")
+
+        updates = {version_env_name: image_tag}
+        updates.update({str(key): str(value) for key, value in env_updates.items()})
+        for key, value in updates.items():
+            lines = set_env_value(lines, key, value)
+
+        new = "\n".join(lines) + "\n"
+        if old == new:
+            raise SystemExit(f"no manifest update was made in {path}")
+        path.write_text(new)
+        PY
+
+        git diff -- "${DEPLOYMENT_PATH}"
+        git add "${DEPLOYMENT_PATH}"
+        git commit -m "${COMMIT_MESSAGE}"
+        gitops_commit="$(git rev-parse HEAD)"
+        git push origin "${GITOPS_BRANCH}"
+
+        finished_at="$(date +%s)"
+        echo "commit=${gitops_commit}" >> "${GITHUB_OUTPUT}"
+        echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"

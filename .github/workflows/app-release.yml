@@ -1,0 +1,232 @@
+name: App Release
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: false
+        default: ubuntu-latest
+      release-key:
+        type: string
+        required: true
+      registry:
+        type: string
+        required: true
+      image-project:
+        type: string
+        required: true
+      image-name:
+        type: string
+        required: true
+      build-context:
+        type: string
+        required: false
+        default: .
+      dockerfile:
+        type: string
+        required: false
+        default: ""
+      gitops-repository:
+        type: string
+        required: true
+      gitops-branch:
+        type: string
+        required: false
+        default: main
+      deployment-path:
+        type: string
+        required: true
+      deployment-container-name:
+        type: string
+        required: false
+        default: ""
+      deployment-app-name:
+        type: string
+        required: true
+      app-url:
+        type: string
+        required: false
+        default: ""
+      health-url:
+        type: string
+        required: true
+      env-updates:
+        type: string
+        required: false
+        default: "{}"
+      version-env-name:
+        type: string
+        required: false
+        default: APP_VERSION
+      health-version-field:
+        type: string
+        required: false
+        default: version
+      sync-attempts:
+        type: string
+        required: false
+        default: "30"
+      live-version-attempts:
+        type: string
+        required: false
+        default: "90"
+      live-version-interval-seconds:
+        type: string
+        required: false
+        default: "2"
+      timeout-minutes:
+        type: number
+        required: false
+        default: 8
+    secrets:
+      registry_username:
+        required: true
+      registry_password:
+        required: true
+      manifest_repository_token:
+        required: true
+      deployment_server:
+        required: true
+      deployment_auth_token:
+        required: true
+      deployment_resolve_ip:
+        required: false
+      deployment_insecure:
+        required: false
+      telegram_bot_token:
+        required: false
+      telegram_chat_id:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    concurrency:
+      group: ${{ inputs.release-key }}
+      cancel-in-progress: true
+    env:
+      DOCKER_BUILDKIT: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_PROJECT: ${{ inputs.image-project }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+        run: |
+          started_at="$(date +%s)"
+          started_at_iso="$(date -u -d "@${started_at}" '+%Y-%m-%dT%H:%M:%SZ')"
+          image_tag="main-${GITHUB_RUN_NUMBER}-${GITHUB_SHA}"
+          image_ref="${REGISTRY}/${IMAGE_PROJECT}/${IMAGE_NAME}:${image_tag}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "started_at=${started_at}"
+            echo "started_at_iso=${started_at_iso}"
+            echo "image_tag=${image_tag}"
+            echo "image_ref=${image_ref}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Notify release started
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v1
+        with:
+          token: ${{ secrets.telegram_bot_token }}
+          chat-id: ${{ secrets.telegram_chat_id }}
+          phase: started
+          app-name: ${{ inputs.app-name }}
+          image-tag: ${{ steps.meta.outputs.image_tag }}
+          app-url: ${{ inputs.app-url }}
+          run-url: ${{ steps.meta.outputs.run_url }}
+          started-at-iso: ${{ steps.meta.outputs.started_at_iso }}
+
+      - name: Login to registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: Build and publish image
+        id: image
+        shell: bash
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
+          BUILD_CONTEXT: ${{ inputs.build-context }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          started_at="$(date +%s)"
+          docker_args=(build --pull=false --progress=plain -t "${IMAGE_REF}")
+          if [ -n "${DOCKERFILE}" ]; then
+            docker_args+=(-f "${DOCKERFILE}")
+          fi
+          docker_args+=("${BUILD_CONTEXT}")
+          docker "${docker_args[@]}"
+          docker push "${IMAGE_REF}"
+          finished_at="$(date +%s)"
+          echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+
+      - name: Update deployment manifest
+        id: manifest
+        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v1
+        with:
+          repository: ${{ inputs.gitops-repository }}
+          branch: ${{ inputs.gitops-branch }}
+          repository-token: ${{ secrets.manifest_repository_token }}
+          deployment-path: ${{ inputs.deployment-path }}
+          container-name: ${{ inputs.deployment-container-name }}
+          image-ref: ${{ steps.meta.outputs.image_ref }}
+          image-tag: ${{ steps.meta.outputs.image_tag }}
+          version-env-name: ${{ inputs.version-env-name }}
+          env-updates: ${{ inputs.env-updates }}
+          commit-message: "chore: release ${{ inputs.release-key }} ${{ steps.meta.outputs.image_tag }}"
+
+      - name: Sync deployment
+        id: sync
+        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v1
+        with:
+          server: ${{ secrets.deployment_server }}
+          auth-token: ${{ secrets.deployment_auth_token }}
+          app-name: ${{ inputs.deployment-app-name }}
+          revision: ${{ steps.manifest.outputs.commit }}
+          resolve-ip: ${{ secrets.deployment_resolve_ip }}
+          insecure: ${{ secrets.deployment_insecure }}
+          attempts: ${{ inputs.sync-attempts }}
+
+      - name: Await live version
+        id: live
+        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v1
+        with:
+          health-url: ${{ inputs.health-url }}
+          expected-version: ${{ steps.meta.outputs.image_tag }}
+          version-field: ${{ inputs.health-version-field }}
+          attempts: ${{ inputs.live-version-attempts }}
+          interval-seconds: ${{ inputs.live-version-interval-seconds }}
+
+      - name: Notify release finished
+        if: always()
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v1
+        with:
+          token: ${{ secrets.telegram_bot_token }}
+          chat-id: ${{ secrets.telegram_chat_id }}
+          phase: finished
+          app-name: ${{ inputs.app-name }}
+          status: ${{ job.status }}
+          image-tag: ${{ steps.meta.outputs.image_tag }}
+          app-url: ${{ inputs.app-url }}
+          run-url: ${{ steps.meta.outputs.run_url }}
+          started-at-epoch: ${{ steps.meta.outputs.started_at }}
+          build-duration-seconds: ${{ steps.image.outputs.duration_seconds }}
+          sync-duration-seconds: ${{ steps.sync.outputs.duration_seconds }}
+          verify-duration-seconds: ${{ steps.live.outputs.duration_seconds }}
