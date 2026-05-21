@@ -1,0 +1,216 @@
+name: FluxCD Image Release
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: false
+        default: ubuntu-latest
+      timeout-minutes:
+        type: number
+        required: false
+        default: 20
+      concurrency-group:
+        type: string
+        required: true
+      registry:
+        type: string
+        required: true
+      image-project:
+        type: string
+        required: true
+      image-name:
+        type: string
+        required: true
+      source-image-ref:
+        type: string
+        required: false
+        default: ""
+      build-context:
+        type: string
+        required: false
+        default: .
+      dockerfile:
+        type: string
+        required: false
+        default: ""
+      platform:
+        type: string
+        required: false
+        default: ""
+      build-args:
+        type: string
+        required: false
+        default: ""
+      smoke-test-command:
+        type: string
+        required: false
+        default: ""
+      app-url:
+        type: string
+        required: false
+        default: ""
+      health-url:
+        type: string
+        required: false
+        default: ""
+      health-version-field:
+        type: string
+        required: false
+        default: ""
+      live-version-attempts:
+        type: string
+        required: false
+        default: "90"
+      live-version-interval-seconds:
+        type: string
+        required: false
+        default: "2"
+    secrets:
+      registry_username:
+        required: true
+      registry_password:
+        required: true
+      telegram_bot_token:
+        required: false
+      telegram_chat_id:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    concurrency:
+      group: ${{ inputs.concurrency-group }}
+      cancel-in-progress: true
+    env:
+      DOCKER_BUILDKIT: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_PROJECT: ${{ inputs.image-project }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+        run: |
+          started_at="$(date +%s)"
+          started_at_iso="$(date -u -d "@${started_at}" '+%Y-%m-%dT%H:%M:%SZ')"
+          image_tag="main-${GITHUB_RUN_NUMBER}-${GITHUB_SHA}"
+          image_ref="${REGISTRY}/${IMAGE_PROJECT}/${IMAGE_NAME}:${image_tag}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "started_at=${started_at}"
+            echo "started_at_iso=${started_at_iso}"
+            echo "image_tag=${image_tag}"
+            echo "image_ref=${image_ref}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Notify release started
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v8
+        with:
+          token: ${{ secrets.telegram_bot_token }}
+          chat-id: ${{ secrets.telegram_chat_id }}
+          phase: started
+          app-name: ${{ inputs.app-name }}
+          image-tag: ${{ steps.meta.outputs.image_tag }}
+          app-url: ${{ inputs.app-url }}
+          run-url: ${{ steps.meta.outputs.run_url }}
+          started-at-iso: ${{ steps.meta.outputs.started_at_iso }}
+
+      - name: Login to registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: Build or promote image
+        id: image
+        shell: bash
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
+          SOURCE_IMAGE_REF: ${{ inputs.source-image-ref }}
+          BUILD_CONTEXT: ${{ inputs.build-context }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          PLATFORM: ${{ inputs.platform }}
+          BUILD_ARGS: ${{ inputs.build-args }}
+          SMOKE_TEST_COMMAND: ${{ inputs.smoke-test-command }}
+        run: |
+          started_at="$(date +%s)"
+          if [ -n "${SOURCE_IMAGE_REF}" ]; then
+            if [ -n "${BUILD_ARGS}" ] || [ -n "${SMOKE_TEST_COMMAND}" ]; then
+              echo "build-args and smoke-test-command are not supported with source-image-ref"
+              exit 1
+            fi
+            docker buildx imagetools create --tag "${IMAGE_REF}" "${SOURCE_IMAGE_REF}"
+            finished_at="$(date +%s)"
+            echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          docker_args=(build --pull=false --progress=plain -t "${IMAGE_REF}")
+          if [ -n "${PLATFORM}" ]; then
+            docker_args+=(--platform "${PLATFORM}")
+          fi
+          if [ -n "${DOCKERFILE}" ]; then
+            docker_args+=(-f "${DOCKERFILE}")
+          fi
+          while IFS= read -r build_arg; do
+            if [ -n "${build_arg}" ]; then
+              docker_args+=(--build-arg "${build_arg}")
+            fi
+          done <<< "${BUILD_ARGS}"
+          docker_args+=(--build-arg "BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
+          docker_args+=(--build-arg "VCS_REF=${GITHUB_SHA}")
+          docker_args+=("${BUILD_CONTEXT}")
+          docker "${docker_args[@]}"
+          if [ -n "${SMOKE_TEST_COMMAND}" ]; then
+            run_args=(run --rm)
+            if [ -n "${PLATFORM}" ]; then
+              run_args+=(--platform "${PLATFORM}")
+            fi
+            run_args+=(--entrypoint /bin/bash "${IMAGE_REF}" -lc "${SMOKE_TEST_COMMAND}")
+            docker "${run_args[@]}"
+          fi
+          docker push "${IMAGE_REF}"
+          finished_at="$(date +%s)"
+          echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+
+      - name: Await live version
+        if: ${{ inputs.health-url != '' }}
+        id: live
+        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v8
+        with:
+          health-url: ${{ inputs.health-url }}
+          expected-version: ${{ steps.meta.outputs.image_tag }}
+          version-field: ${{ inputs.health-version-field }}
+          attempts: ${{ inputs.live-version-attempts }}
+          interval-seconds: ${{ inputs.live-version-interval-seconds }}
+
+      - name: Notify release finished
+        if: always()
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v8
+        with:
+          token: ${{ secrets.telegram_bot_token }}
+          chat-id: ${{ secrets.telegram_chat_id }}
+          phase: finished
+          app-name: ${{ inputs.app-name }}
+          status: ${{ job.status }}
+          image-tag: ${{ steps.meta.outputs.image_tag }}
+          app-url: ${{ inputs.app-url }}
+          run-url: ${{ steps.meta.outputs.run_url }}
+          started-at-epoch: ${{ steps.meta.outputs.started_at }}
+          build-duration-seconds: ${{ steps.image.outputs.duration_seconds }}
+          verify-duration-seconds: ${{ steps.live.outputs.duration_seconds }}

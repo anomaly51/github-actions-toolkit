@@ -4,11 +4,16 @@ Reusable workflow building blocks for application release pipelines.
 
 ## Workflows
 
-- `.github/workflows/app-release.yml` - builds or promotes a container image,
+- `.github/workflows/argocd-app-release.yml` - builds or promotes a container image,
   publishes it, updates a Kubernetes deployment manifest in a GitOps repository,
   synchronizes the deployment when Argo CD credentials are provided, waits for
   the live application health/version check, and sends Telegram release
   notifications.
+- `.github/workflows/fluxcd-image-release.yml` - builds or promotes a container
+  image, publishes it with a Flux Image Automation-compatible tag, optionally
+  waits for the live health endpoint, and sends Telegram release notifications.
+  It does not edit GitOps manifests directly; FluxCD image automation owns that
+  part.
 
 ## Actions
 
@@ -26,7 +31,7 @@ Use immutable tags from application repositories, for example:
 ```yaml
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v7
+    uses: anomaly51/github-actions-toolkit/.github/workflows/argocd-app-release.yml@v8
     with:
       concurrency-group: my-application
 ```
@@ -50,3 +55,8 @@ Defaults:
   image tag instead of running a local Docker build.
 - `platform` and `smoke-test-command` are optional build checks for images that
   need a fixed runtime platform or container smoke test before push.
+
+FluxCD release workflows use the same `concurrency-group` and image naming
+inputs, but they only publish the image. The tag format is
+`main-<run-number>-<sha>`, which matches Flux image policies using a numerical
+`main-(?P<build>[0-9]+)-.*` filter.

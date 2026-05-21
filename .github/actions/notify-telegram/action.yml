@@ -128,18 +128,20 @@ runs:
             lines = [
                 f"<b>{esc(app_name)}</b> - {esc(result)}",
                 f"Status <code>{esc(status)}</code> - Total <b>{esc(total_duration)}</b>",
-                "",
-                (
-                    "Build "
-                    f"<code>{esc(duration(value('BUILD_DURATION_SECONDS')))}</code> - "
-                    "Sync "
-                    f"<code>{esc(duration(value('SYNC_DURATION_SECONDS')))}</code> - "
-                    "Live version "
-                    f"<code>{esc(duration(value('VERIFY_DURATION_SECONDS')))}</code>"
-                ),
-                "",
-                f"Version <code>{esc(image_tag)}</code>",
             ]
+            duration_parts = []
+            build_duration = value("BUILD_DURATION_SECONDS")
+            sync_duration = value("SYNC_DURATION_SECONDS")
+            verify_duration = value("VERIFY_DURATION_SECONDS")
+            if build_duration:
+                duration_parts.append(f"Build <code>{esc(duration(build_duration))}</code>")
+            if sync_duration:
+                duration_parts.append(f"Sync <code>{esc(duration(sync_duration))}</code>")
+            if verify_duration:
+                duration_parts.append(f"Live version <code>{esc(duration(verify_duration))}</code>")
+            if duration_parts:
+                lines.extend(["", " - ".join(duration_parts)])
+            lines.extend(["", f"Version <code>{esc(image_tag)}</code>"])
 
         if app_url:
             lines.extend(["", esc(app_url)])
@@ -159,4 +161,3 @@ runs:
             if response.status >= 300:
                 raise SystemExit(body.decode("utf-8", "replace"))
         PY
-
