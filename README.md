@@ -31,7 +31,7 @@ Use immutable tags from application repositories, for example:
 ```yaml
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/argocd-app-release.yml@v9
+    uses: anomaly51/github-actions-toolkit/.github/workflows/argocd-app-release.yml@v10
     with:
       concurrency-group: my-application
 ```
@@ -55,6 +55,9 @@ Defaults:
   image tag instead of running a local Docker build.
 - `platform` and `smoke-test-command` are optional build checks for images that
   need a fixed runtime platform or container smoke test before push.
+- `registry-resolve-host` can be set when the runner should bypass public DNS
+  for the registry, for example to push large Harbor layers directly through an
+  in-cluster Traefik service while keeping the public image reference unchanged.
 
 FluxCD release workflows use the same `concurrency-group` and image naming
 inputs, but they only publish the image. The tag format is

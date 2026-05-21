@@ -16,6 +16,10 @@ on:
       registry:
         type: string
         required: true
+      registry-resolve-host:
+        type: string
+        required: false
+        default: ""
       image-project:
         type: string
         required: true
@@ -170,7 +174,7 @@ jobs:
           fi
 
       - name: Notify release started
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v9
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v10
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
@@ -180,6 +184,20 @@ jobs:
           app-url: ${{ inputs.app-url }}
           run-url: ${{ steps.meta.outputs.run_url }}
           started-at-iso: ${{ steps.meta.outputs.started_at_iso }}
+
+      - name: Resolve registry directly
+        if: ${{ inputs.registry-resolve-host != '' }}
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          REGISTRY_RESOLVE_HOST: ${{ inputs.registry-resolve-host }}
+        run: |
+          registry_ip="$(getent ahostsv4 "${REGISTRY_RESOLVE_HOST}" | awk '{ print $1; exit }')"
+          if [ -z "${registry_ip}" ]; then
+            echo "Could not resolve ${REGISTRY_RESOLVE_HOST}"
+            exit 1
+          fi
+          echo "${registry_ip} ${REGISTRY}" | sudo tee -a /etc/hosts
 
       - name: Login to registry
         uses: docker/login-action@v4
@@ -236,7 +254,7 @@ jobs:
 
       - name: Update deployment manifest
         id: manifest
-        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v9
+        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v10
         with:
           repository: ${{ inputs.gitops-repository }}
           branch: ${{ inputs.gitops-branch }}
@@ -252,7 +270,7 @@ jobs:
       - name: Sync deployment
         if: steps.deployment.outputs.sync_enabled == 'true'
         id: sync
-        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v9
+        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v10
         with:
           server: ${{ secrets.deployment_server }}
           auth-token: ${{ secrets.deployment_auth_token }}
@@ -264,7 +282,7 @@ jobs:
 
       - name: Await live version
         id: live
-        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v9
+        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v10
         with:
           health-url: ${{ inputs.health-url }}
           expected-version: ${{ steps.meta.outputs.image_tag }}
@@ -274,7 +292,7 @@ jobs:
 
       - name: Notify release finished
         if: always()
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v9
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v10
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
