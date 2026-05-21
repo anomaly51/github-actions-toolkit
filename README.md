@@ -25,7 +25,7 @@ Use immutable tags from application repositories, for example:
 ```yaml
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v3
+    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v4
     with:
       concurrency-group: my-application
 ```

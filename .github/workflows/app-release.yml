@@ -13,14 +13,6 @@ on:
       concurrency-group:
         type: string
         required: true
-      deployment-lock-key:
-        type: string
-        required: false
-        default: ""
-      release-key:
-        type: string
-        required: false
-        default: ""
       registry:
         type: string
         required: true
@@ -118,7 +110,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
-      group: ${{ inputs.concurrency-group || inputs.deployment-lock-key || inputs.release-key }}
+      group: ${{ inputs.concurrency-group }}
       cancel-in-progress: true
     env:
       DOCKER_BUILDKIT: "1"
@@ -198,7 +190,7 @@ jobs:
           image-tag: ${{ steps.meta.outputs.image_tag }}
           version-env-name: ${{ inputs.version-env-name }}
           env-updates: ${{ inputs.env-updates }}
-          commit-message: "chore: release ${{ inputs.concurrency-group || inputs.deployment-lock-key || inputs.release-key }} ${{ steps.meta.outputs.image_tag }}"
+          commit-message: "chore: release ${{ inputs.concurrency-group }} ${{ steps.meta.outputs.image_tag }}"
 
       - name: Sync deployment
         id: sync
