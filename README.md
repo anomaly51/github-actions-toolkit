@@ -25,6 +25,12 @@ Use immutable tags from application repositories, for example:
 ```yaml
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v1
+    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v2
+    with:
+      deployment-lock-key: my-application
 ```
 
+`deployment-lock-key` is the GitHub Actions concurrency group for one
+application deployment. Use one stable key per application, for example
+`architect-business-bot`, so newer runs can cancel stale runs for the same app
+without affecting other applications.

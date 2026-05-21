@@ -10,9 +10,13 @@ on:
         type: string
         required: false
         default: ubuntu-latest
-      release-key:
+      deployment-lock-key:
         type: string
         required: true
+      release-key:
+        type: string
+        required: false
+        default: ""
       registry:
         type: string
         required: true
@@ -110,7 +114,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
-      group: ${{ inputs.release-key }}
+      group: ${{ inputs.deployment-lock-key || inputs.release-key }}
       cancel-in-progress: true
     env:
       DOCKER_BUILDKIT: "1"
@@ -190,7 +194,7 @@ jobs:
           image-tag: ${{ steps.meta.outputs.image_tag }}
           version-env-name: ${{ inputs.version-env-name }}
           env-updates: ${{ inputs.env-updates }}
-          commit-message: "chore: release ${{ inputs.release-key }} ${{ steps.meta.outputs.image_tag }}"
+          commit-message: "chore: release ${{ inputs.deployment-lock-key || inputs.release-key }} ${{ steps.meta.outputs.image_tag }}"
 
       - name: Sync deployment
         id: sync
