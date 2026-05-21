@@ -22,6 +22,10 @@ on:
       image-name:
         type: string
         required: true
+      source-image-ref:
+        type: string
+        required: false
+        default: ""
       build-context:
         type: string
         required: false
@@ -166,7 +170,7 @@ jobs:
           fi
 
       - name: Notify release started
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v6
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v7
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
@@ -184,17 +188,29 @@ jobs:
           username: ${{ secrets.registry_username }}
           password: ${{ secrets.registry_password }}
 
-      - name: Build and publish image
+      - name: Build or promote image
         id: image
         shell: bash
         env:
           IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
+          SOURCE_IMAGE_REF: ${{ inputs.source-image-ref }}
           BUILD_CONTEXT: ${{ inputs.build-context }}
           DOCKERFILE: ${{ inputs.dockerfile }}
           PLATFORM: ${{ inputs.platform }}
           SMOKE_TEST_COMMAND: ${{ inputs.smoke-test-command }}
         run: |
           started_at="$(date +%s)"
+          if [ -n "${SOURCE_IMAGE_REF}" ]; then
+            if [ -n "${SMOKE_TEST_COMMAND}" ]; then
+              echo "smoke-test-command is not supported with source-image-ref"
+              exit 1
+            fi
+            docker buildx imagetools create --tag "${IMAGE_REF}" "${SOURCE_IMAGE_REF}"
+            finished_at="$(date +%s)"
+            echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
           docker_args=(build --pull=false --progress=plain -t "${IMAGE_REF}")
           if [ -n "${PLATFORM}" ]; then
             docker_args+=(--platform "${PLATFORM}")
@@ -220,7 +236,7 @@ jobs:
 
       - name: Update deployment manifest
         id: manifest
-        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v6
+        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v7
         with:
           repository: ${{ inputs.gitops-repository }}
           branch: ${{ inputs.gitops-branch }}
@@ -236,7 +252,7 @@ jobs:
       - name: Sync deployment
         if: steps.deployment.outputs.sync_enabled == 'true'
         id: sync
-        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v6
+        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v7
         with:
           server: ${{ secrets.deployment_server }}
           auth-token: ${{ secrets.deployment_auth_token }}
@@ -248,7 +264,7 @@ jobs:
 
       - name: Await live version
         id: live
-        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v6
+        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v7
         with:
           health-url: ${{ inputs.health-url }}
           expected-version: ${{ steps.meta.outputs.image_tag }}
@@ -258,7 +274,7 @@ jobs:
 
       - name: Notify release finished
         if: always()
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v6
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v7
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}

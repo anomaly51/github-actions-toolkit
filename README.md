@@ -4,10 +4,11 @@ Reusable workflow building blocks for application release pipelines.
 
 ## Workflows
 
-- `.github/workflows/app-release.yml` - builds a container image, publishes it,
-  updates a Kubernetes deployment manifest in a GitOps repository, synchronizes
-  the deployment when Argo CD credentials are provided, waits for the live
-  application health/version check, and sends Telegram release notifications.
+- `.github/workflows/app-release.yml` - builds or promotes a container image,
+  publishes it, updates a Kubernetes deployment manifest in a GitOps repository,
+  synchronizes the deployment when Argo CD credentials are provided, waits for
+  the live application health/version check, and sends Telegram release
+  notifications.
 
 ## Actions
 
@@ -25,7 +26,7 @@ Use immutable tags from application repositories, for example:
 ```yaml
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v6
+    uses: anomaly51/github-actions-toolkit/.github/workflows/app-release.yml@v7
     with:
       concurrency-group: my-application
 ```
@@ -45,5 +46,7 @@ Defaults:
   deployment version.
 - `health-version-field` can be empty when the workflow should wait for HTTP
   health only.
+- `source-image-ref` can be set when the release should promote an existing
+  image tag instead of running a local Docker build.
 - `platform` and `smoke-test-command` are optional build checks for images that
   need a fixed runtime platform or container smoke test before push.
