@@ -109,15 +109,16 @@ runs:
         if phase == "started":
             started = value("STARTED_AT_ISO", "unknown")
             lines = [
-                f"<b>{esc(app_name)}</b> release started",
+                f"🚀 <b>{esc(app_name)}</b> release started",
                 "",
-                f"Version <code>{esc(image_tag)}</code>",
-                f"Started <code>{esc(started)}</code>",
+                f"🏷️ Version <code>{esc(image_tag)}</code>",
+                f"🕒 Started <code>{esc(started)}</code>",
             ]
         else:
             status = value("STATUS", "unknown")
             success = status == "success"
             result = "Release finished successfully" if success else "Release failed"
+            result_icon = "✅" if success else "❌"
             started_epoch = value("STARTED_AT_EPOCH")
             total_duration = "unknown"
             if started_epoch:
@@ -126,7 +127,7 @@ runs:
                 except ValueError:
                     total_duration = "unknown"
             lines = [
-                f"<b>{esc(app_name)}</b> - {esc(result)}",
+                f"{result_icon} <b>{esc(app_name)}</b> - {esc(result)}",
                 f"Status <code>{esc(status)}</code> - Total <b>{esc(total_duration)}</b>",
             ]
             duration_parts = []
@@ -140,8 +141,8 @@ runs:
             if verify_duration:
                 duration_parts.append(f"Live version <code>{esc(duration(verify_duration))}</code>")
             if duration_parts:
-                lines.extend(["", " - ".join(duration_parts)])
-            lines.extend(["", f"Version <code>{esc(image_tag)}</code>"])
+                lines.extend(["", f"⏱️ {' - '.join(duration_parts)}"])
+            lines.extend(["", f"🏷️ Version <code>{esc(image_tag)}</code>"])
 
         if app_url:
             lines.extend(["", esc(app_url)])

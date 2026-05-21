@@ -174,7 +174,7 @@ jobs:
           fi
 
       - name: Notify release started
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v10
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v11
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
@@ -292,7 +292,7 @@ jobs:
 
       - name: Notify release finished
         if: always()
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v10
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v11
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
