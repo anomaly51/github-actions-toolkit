@@ -31,7 +31,7 @@ Use immutable tags from application repositories, for example:
 ```yaml
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/argocd-app-release.yml@v8
+    uses: anomaly51/github-actions-toolkit/.github/workflows/argocd-app-release.yml@v9
     with:
       concurrency-group: my-application
 ```

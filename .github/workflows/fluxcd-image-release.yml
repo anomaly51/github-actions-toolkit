@@ -118,7 +118,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Notify release started
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v8
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v9
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
@@ -160,7 +160,7 @@ jobs:
             exit 0
           fi
 
-          docker_args=(build --pull=false --progress=plain -t "${IMAGE_REF}")
+          docker_args=(--pull=false --progress=plain -t "${IMAGE_REF}")
           if [ -n "${PLATFORM}" ]; then
             docker_args+=(--platform "${PLATFORM}")
           fi
@@ -175,23 +175,25 @@ jobs:
           docker_args+=(--build-arg "BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
           docker_args+=(--build-arg "VCS_REF=${GITHUB_SHA}")
           docker_args+=("${BUILD_CONTEXT}")
-          docker "${docker_args[@]}"
           if [ -n "${SMOKE_TEST_COMMAND}" ]; then
+            docker build "${docker_args[@]}"
             run_args=(run --rm)
             if [ -n "${PLATFORM}" ]; then
               run_args+=(--platform "${PLATFORM}")
             fi
             run_args+=(--entrypoint /bin/bash "${IMAGE_REF}" -lc "${SMOKE_TEST_COMMAND}")
             docker "${run_args[@]}"
+            docker push "${IMAGE_REF}"
+          else
+            docker buildx build --push "${docker_args[@]}"
           fi
-          docker push "${IMAGE_REF}"
           finished_at="$(date +%s)"
           echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
 
       - name: Await live version
         if: ${{ inputs.health-url != '' }}
         id: live
-        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v8
+        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v9
         with:
           health-url: ${{ inputs.health-url }}
           expected-version: ${{ steps.meta.outputs.image_tag }}
@@ -201,7 +203,7 @@ jobs:
 
       - name: Notify release finished
         if: always()
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v8
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v9
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
