@@ -34,3 +34,10 @@ jobs:
 Use one stable group per application, for example `architect-business-bot`, so
 newer runs can cancel stale runs for the same app without affecting other
 applications.
+
+Defaults:
+
+- `gitops-branch` defaults to `main`.
+- `deployment-app-name` defaults to `concurrency-group`.
+- `deployment-container-name` defaults to the first container image in the
+  deployment manifest. Set it only for multi-container deployments.

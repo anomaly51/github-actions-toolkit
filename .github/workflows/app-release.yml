@@ -46,7 +46,8 @@ on:
         default: ""
       deployment-app-name:
         type: string
-        required: true
+        required: false
+        default: ""
       app-url:
         type: string
         required: false
@@ -139,6 +140,16 @@ jobs:
             echo "run_url=${run_url}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Prepare deployment metadata
+        id: deployment
+        shell: bash
+        env:
+          DEPLOYMENT_APP_NAME: ${{ inputs.deployment-app-name }}
+          CONCURRENCY_GROUP: ${{ inputs.concurrency-group }}
+        run: |
+          app_name="${DEPLOYMENT_APP_NAME:-${CONCURRENCY_GROUP}}"
+          echo "app_name=${app_name}" >> "${GITHUB_OUTPUT}"
+
       - name: Notify release started
         uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v1
         with:
@@ -198,7 +209,7 @@ jobs:
         with:
           server: ${{ secrets.deployment_server }}
           auth-token: ${{ secrets.deployment_auth_token }}
-          app-name: ${{ inputs.deployment-app-name }}
+          app-name: ${{ steps.deployment.outputs.app_name }}
           revision: ${{ steps.manifest.outputs.commit }}
           resolve-ip: ${{ secrets.deployment_resolve_ip }}
           insecure: ${{ secrets.deployment_insecure }}
