@@ -30,6 +30,14 @@ on:
         type: string
         required: false
         default: ""
+      platform:
+        type: string
+        required: false
+        default: ""
+      smoke-test-command:
+        type: string
+        required: false
+        default: ""
       gitops-repository:
         type: string
         required: true
@@ -91,9 +99,9 @@ on:
       manifest_repository_token:
         required: true
       deployment_server:
-        required: true
+        required: false
       deployment_auth_token:
-        required: true
+        required: false
       deployment_resolve_ip:
         required: false
       deployment_insecure:
@@ -146,12 +154,19 @@ jobs:
         env:
           DEPLOYMENT_APP_NAME: ${{ inputs.deployment-app-name }}
           CONCURRENCY_GROUP: ${{ inputs.concurrency-group }}
+          DEPLOYMENT_SERVER: ${{ secrets.deployment_server }}
+          DEPLOYMENT_AUTH_TOKEN: ${{ secrets.deployment_auth_token }}
         run: |
           app_name="${DEPLOYMENT_APP_NAME:-${CONCURRENCY_GROUP}}"
           echo "app_name=${app_name}" >> "${GITHUB_OUTPUT}"
+          if [ -n "${DEPLOYMENT_SERVER}" ] && [ -n "${DEPLOYMENT_AUTH_TOKEN}" ]; then
+            echo "sync_enabled=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "sync_enabled=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Notify release started
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v1
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v6
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}
@@ -176,21 +191,36 @@ jobs:
           IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
           BUILD_CONTEXT: ${{ inputs.build-context }}
           DOCKERFILE: ${{ inputs.dockerfile }}
+          PLATFORM: ${{ inputs.platform }}
+          SMOKE_TEST_COMMAND: ${{ inputs.smoke-test-command }}
         run: |
           started_at="$(date +%s)"
           docker_args=(build --pull=false --progress=plain -t "${IMAGE_REF}")
+          if [ -n "${PLATFORM}" ]; then
+            docker_args+=(--platform "${PLATFORM}")
+          fi
           if [ -n "${DOCKERFILE}" ]; then
             docker_args+=(-f "${DOCKERFILE}")
           fi
+          docker_args+=(--build-arg "BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
+          docker_args+=(--build-arg "VCS_REF=${GITHUB_SHA}")
           docker_args+=("${BUILD_CONTEXT}")
           docker "${docker_args[@]}"
+          if [ -n "${SMOKE_TEST_COMMAND}" ]; then
+            run_args=(run --rm)
+            if [ -n "${PLATFORM}" ]; then
+              run_args+=(--platform "${PLATFORM}")
+            fi
+            run_args+=(--entrypoint /bin/bash "${IMAGE_REF}" -lc "${SMOKE_TEST_COMMAND}")
+            docker "${run_args[@]}"
+          fi
           docker push "${IMAGE_REF}"
           finished_at="$(date +%s)"
           echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
 
       - name: Update deployment manifest
         id: manifest
-        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v1
+        uses: anomaly51/github-actions-toolkit/.github/actions/deployment-manifest-update@v6
         with:
           repository: ${{ inputs.gitops-repository }}
           branch: ${{ inputs.gitops-branch }}
@@ -204,8 +234,9 @@ jobs:
           commit-message: "chore: release ${{ inputs.concurrency-group }} ${{ steps.meta.outputs.image_tag }}"
 
       - name: Sync deployment
+        if: steps.deployment.outputs.sync_enabled == 'true'
         id: sync
-        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v1
+        uses: anomaly51/github-actions-toolkit/.github/actions/sync-deployment@v6
         with:
           server: ${{ secrets.deployment_server }}
           auth-token: ${{ secrets.deployment_auth_token }}
@@ -217,7 +248,7 @@ jobs:
 
       - name: Await live version
         id: live
-        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v1
+        uses: anomaly51/github-actions-toolkit/.github/actions/await-live-version@v6
         with:
           health-url: ${{ inputs.health-url }}
           expected-version: ${{ steps.meta.outputs.image_tag }}
@@ -227,7 +258,7 @@ jobs:
 
       - name: Notify release finished
         if: always()
-        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v1
+        uses: anomaly51/github-actions-toolkit/.github/actions/notify-telegram@v6
         with:
           token: ${{ secrets.telegram_bot_token }}
           chat-id: ${{ secrets.telegram_chat_id }}

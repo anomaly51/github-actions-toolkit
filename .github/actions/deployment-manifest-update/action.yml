@@ -155,7 +155,9 @@ runs:
             target = f"container {container_name}" if container_name else "first image line"
             raise SystemExit(f"could not update image for {target} in {path}")
 
-        updates = {version_env_name: image_tag}
+        updates = {}
+        if version_env_name:
+            updates[version_env_name] = image_tag
         updates.update({str(key): str(value) for key, value in env_updates.items()})
         for key, value in updates.items():
             lines = set_env_value(lines, key, value)

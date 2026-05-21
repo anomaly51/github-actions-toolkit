@@ -1,5 +1,5 @@
 name: Await Live Version
-description: Wait until a health endpoint reports the expected live version.
+description: Wait until a health endpoint reports the expected live version, or just becomes healthy when no version field is configured.
 inputs:
   health-url:
     description: Health endpoint URL.
@@ -8,7 +8,7 @@ inputs:
     description: Version expected from the health endpoint.
     required: true
   version-field:
-    description: JSON field containing the live version.
+    description: JSON field containing the live version. Leave empty to wait for HTTP health only.
     required: false
     default: version
   attempts:
@@ -44,6 +44,14 @@ runs:
 
         for attempt in $(seq 1 "${ATTEMPTS}"); do
           response="$(curl -fsS "${HEALTH_URL}" || true)"
+          if [ -z "${VERSION_FIELD}" ] && [ -n "${response}" ]; then
+            finished_at="$(date +%s)"
+            echo "Health endpoint is live"
+            echo "duration_seconds=$((finished_at - started_at))" >> "${GITHUB_OUTPUT}"
+            echo "live_version=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
           version="$(printf '%s' "${response}" | python3 -c 'import json, os, sys; print(json.load(sys.stdin).get(os.environ["VERSION_FIELD"], ""))' 2>/dev/null || true)"
           last_version="${version}"
 
