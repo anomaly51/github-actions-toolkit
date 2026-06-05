@@ -253,7 +253,7 @@ jobs:
             health_status="$(jq -r '.status.health.status // "Unknown"' <<< "$app_json")"
             images="$(jq -r '.status.summary.images[]?' <<< "$app_json")"
 
-            if grep -Fxq "$IMAGE_REF" <<< "$images" \
+            if grep -Fq "$IMAGE_REF" <<< "$images" \
               && [ "$sync_status" = "Synced" ] \
               && [ "$health_status" = "Healthy" ]; then
               echo "Verified ${ARGOCD_APPLICATION} at ${IMAGE_REF}"
@@ -261,6 +261,8 @@ jobs:
             fi
 
             echo "Waiting for ${ARGOCD_APPLICATION}: sync=${sync_status}, health=${health_status}, target=${IMAGE_REF}"
+            echo "Observed images:"
+            sed 's/^/  - /' <<< "$images"
             sleep "$DEPLOY_POLL_SECONDS"
           done
 
