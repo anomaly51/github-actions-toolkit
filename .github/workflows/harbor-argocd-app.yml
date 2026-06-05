@@ -243,7 +243,7 @@ jobs:
 
           deadline=$((SECONDS + DEPLOY_TIMEOUT_SECONDS))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            if ! app_json="$(timeout 30s argocd app get "$ARGOCD_APPLICATION" --refresh -o json "${argocd_args[@]}" 2>&1)"; then
+            if ! app_json="$(timeout 30s argocd app get "$ARGOCD_APPLICATION" --hard-refresh -o json "${argocd_args[@]}" 2>&1)"; then
               echo "Waiting for ${ARGOCD_APPLICATION}: argocd app get failed or timed out"
               echo "$app_json"
               sleep "$DEPLOY_POLL_SECONDS"
