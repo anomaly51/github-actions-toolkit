@@ -253,7 +253,17 @@ jobs:
             health_status="$(jq -r '.status.health.status // "Unknown"' <<< "$app_json")"
             images="$(jq -r '.status.summary.images[]?' <<< "$app_json")"
 
-            if grep -Fq "$IMAGE_REF" <<< "$images" \
+            image_found=false
+            if grep -Fq "$IMAGE_REF" <<< "$images"; then
+              image_found=true
+            elif [ "$sync_status" = "Synced" ] && [ "$health_status" = "Healthy" ]; then
+              if manifests="$(timeout 30s argocd app manifests "$ARGOCD_APPLICATION" "${argocd_args[@]}" 2>/dev/null)" \
+                && grep -Fq "$IMAGE_REF" <<< "$manifests"; then
+                image_found=true
+              fi
+            fi
+
+            if [ "$image_found" = "true" ] \
               && [ "$sync_status" = "Synced" ] \
               && [ "$health_status" = "Healthy" ]; then
               echo "Verified ${ARGOCD_APPLICATION} at ${IMAGE_REF}"
