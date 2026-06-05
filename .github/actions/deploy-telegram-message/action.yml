@@ -116,15 +116,15 @@ runs:
             hours, minutes = divmod(minutes, 60)
             return f"{hours}h {minutes}m {rest}s"
 
-        def status_label(status: str) -> str:
+        def status_meta(status: str):
             labels = {
-                "in_progress": "Deploying",
-                "success": "Deployed",
-                "failure": "Failed",
-                "cancelled": "Cancelled",
-                "skipped": "Skipped",
+                "in_progress": ("🚀", "Deploying"),
+                "success": ("✅", "Deployed"),
+                "failure": ("❌", "Failed"),
+                "cancelled": ("⏹", "Cancelled"),
+                "skipped": ("⏭", "Skipped"),
             }
-            return labels.get(status, status or "Deploying")
+            return labels.get(status, ("•", status or "Deploying"))
 
         def build_text(stage: str, status: str, started_epoch: str) -> str:
             now = int(time.time())
@@ -134,21 +134,16 @@ runs:
                 started = now
             elapsed = max(0, now - started)
             app_name = env("APP_NAME", "Application")
-            image_ref = env("IMAGE_REF")
-            ref_name = env("REF_NAME")
             run_url = env("RUN_URL")
+            icon, label = status_meta(status)
             lines = [
-                f"<b>{esc(app_name)}</b>",
-                f"Status: <b>{esc(status_label(status))}</b>",
-                f"Stage: <code>{esc(stage or 'Starting')}</code>",
-                f"Elapsed: <code>{esc(human_duration(elapsed))}</code>",
+                f"{icon} <b>{esc(app_name)}</b>",
+                f"{esc(label)} · <code>{esc(human_duration(elapsed))}</code>",
             ]
-            if image_ref:
-                lines.append(f"Image: <code>{esc(image_ref)}</code>")
-            if ref_name:
-                lines.append(f"Ref: <code>{esc(ref_name)}</code>")
+            if stage:
+                lines.append(esc(stage))
             if run_url:
-                lines.extend(["", esc(run_url)])
+                lines.extend(["", f'<a href="{esc(run_url)}">GitHub Actions</a>'])
             return "\n".join(lines)
 
         def telegram(method: str, payload: dict) -> dict:
