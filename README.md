@@ -37,6 +37,7 @@ jobs:
     uses: anomaly51/github-actions-toolkit/.github/workflows/harbor-argocd-app.yml@main
     with:
       app-name: my-argocd-app
+      notification-title: My App
       image-repository: harbor.api-api-api.com/my-project/my-image
     secrets: inherit
 ```
@@ -56,6 +57,8 @@ Optional inputs:
 - `deploy-poll-seconds`: defaults to `5`.
 - `argocd-cli-version`: defaults to `v3.4.3`.
 - `build-args`: extra Docker build args, one `KEY=VALUE` per line.
+- `notification-title`: optional human-readable title for Telegram deploy
+  messages. Defaults to `app-name`.
 
 Expected caller secrets:
 
@@ -65,6 +68,10 @@ Expected caller secrets:
   is also supported. `ARGOCD_SERVER` is required.
 - `ARGOCD_INSECURE` is optional and defaults to insecure/grpc-web mode unless
   set to `false`.
+- Telegram deploy messages: `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are
+  optional. When present, the workflow creates one deploy message, refreshes it
+  every 10 seconds with elapsed time and current stage, updates it with the
+  final result, then deletes it after about one minute.
 
 The workflow intentionally verifies the deployed image reference, not just a
 successful build. A run is green only after Argo CD summary images contain the

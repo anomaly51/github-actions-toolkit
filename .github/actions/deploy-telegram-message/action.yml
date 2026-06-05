@@ -1,0 +1,270 @@
+name: Deploy Telegram Message
+description: Create, update, heartbeat, and delete one Telegram deployment message.
+inputs:
+  mode:
+    description: One of start, heartbeat, stop, update, delete.
+    required: true
+  token:
+    description: Telegram bot token.
+    required: false
+  chat-id:
+    description: Telegram chat id.
+    required: false
+  message-id:
+    description: Telegram message id to edit or delete.
+    required: false
+    default: ""
+  app-name:
+    description: Human-readable application name.
+    required: true
+  stage:
+    description: Current deployment stage.
+    required: false
+    default: ""
+  status:
+    description: Deployment status.
+    required: false
+    default: in_progress
+  image-ref:
+    description: Built image reference.
+    required: false
+    default: ""
+  run-url:
+    description: GitHub Actions run URL.
+    required: false
+    default: ""
+  ref-name:
+    description: Git ref name.
+    required: false
+    default: ""
+  started-epoch:
+    description: Deployment start time as Unix epoch seconds.
+    required: false
+    default: ""
+  interval-seconds:
+    description: Heartbeat edit interval.
+    required: false
+    default: "10"
+  pid-file:
+    description: Heartbeat process pid file.
+    required: false
+    default: ""
+outputs:
+  message-id:
+    description: Telegram message id created by start mode.
+    value: ${{ steps.telegram.outputs.message-id }}
+  started-epoch:
+    description: Deployment start time as Unix epoch seconds.
+    value: ${{ steps.telegram.outputs.started-epoch }}
+runs:
+  using: composite
+  steps:
+    - name: Manage Telegram deployment message
+      id: telegram
+      shell: bash
+      env:
+        TELEGRAM_MODE: ${{ inputs.mode }}
+        TELEGRAM_BOT_TOKEN: ${{ inputs.token }}
+        TELEGRAM_CHAT_ID: ${{ inputs.chat-id }}
+        TELEGRAM_MESSAGE_ID: ${{ inputs.message-id }}
+        APP_NAME: ${{ inputs.app-name }}
+        DEPLOY_STAGE: ${{ inputs.stage }}
+        DEPLOY_STATUS: ${{ inputs.status }}
+        IMAGE_REF: ${{ inputs.image-ref }}
+        RUN_URL: ${{ inputs.run-url }}
+        REF_NAME: ${{ inputs.ref-name }}
+        STARTED_EPOCH: ${{ inputs.started-epoch }}
+        INTERVAL_SECONDS: ${{ inputs.interval-seconds }}
+        PID_FILE: ${{ inputs.pid-file }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+          echo "Telegram token/chat id are not available; skipping ${TELEGRAM_MODE}."
+          exit 0
+        fi
+
+        telegram_script="${RUNNER_TEMP}/deploy-telegram-message.py"
+        cat > "$telegram_script" <<'PY'
+        import html
+        import json
+        import os
+        import signal
+        import sys
+        import time
+        import urllib.parse
+        import urllib.request
+
+        def env(name: str, default: str = "") -> str:
+            return os.environ.get(name) or default
+
+        def esc(value: str) -> str:
+            return html.escape(value, quote=True)
+
+        def human_duration(seconds: int) -> str:
+            if seconds < 60:
+                return f"{seconds}s"
+            minutes, rest = divmod(seconds, 60)
+            if minutes < 60:
+                return f"{minutes}m {rest}s"
+            hours, minutes = divmod(minutes, 60)
+            return f"{hours}h {minutes}m {rest}s"
+
+        def status_label(status: str) -> str:
+            labels = {
+                "in_progress": "Deploying",
+                "success": "Deployed",
+                "failure": "Failed",
+                "cancelled": "Cancelled",
+                "skipped": "Skipped",
+            }
+            return labels.get(status, status or "Deploying")
+
+        def build_text(stage: str, status: str, started_epoch: str) -> str:
+            now = int(time.time())
+            try:
+                started = int(started_epoch)
+            except ValueError:
+                started = now
+            elapsed = max(0, now - started)
+            app_name = env("APP_NAME", "Application")
+            image_ref = env("IMAGE_REF")
+            ref_name = env("REF_NAME")
+            run_url = env("RUN_URL")
+            lines = [
+                f"<b>{esc(app_name)}</b>",
+                f"Status: <b>{esc(status_label(status))}</b>",
+                f"Stage: <code>{esc(stage or 'Starting')}</code>",
+                f"Elapsed: <code>{esc(human_duration(elapsed))}</code>",
+            ]
+            if image_ref:
+                lines.append(f"Image: <code>{esc(image_ref)}</code>")
+            if ref_name:
+                lines.append(f"Ref: <code>{esc(ref_name)}</code>")
+            if run_url:
+                lines.extend(["", esc(run_url)])
+            return "\n".join(lines)
+
+        def telegram(method: str, payload: dict) -> dict:
+            token = env("TELEGRAM_BOT_TOKEN")
+            data = urllib.parse.urlencode(payload).encode()
+            url = f"https://api.telegram.org/bot{token}/{method}"
+            with urllib.request.urlopen(url, data=data, timeout=15) as response:
+                raw = response.read().decode("utf-8", "replace")
+            parsed = json.loads(raw)
+            if not parsed.get("ok"):
+                raise RuntimeError(raw)
+            return parsed
+
+        def send_message(text: str) -> int:
+            parsed = telegram("sendMessage", {
+                "chat_id": env("TELEGRAM_CHAT_ID"),
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": "true",
+            })
+            return int(parsed["result"]["message_id"])
+
+        def edit_message(message_id: str, text: str) -> None:
+            telegram("editMessageText", {
+                "chat_id": env("TELEGRAM_CHAT_ID"),
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": "true",
+            })
+
+        def delete_message(message_id: str) -> None:
+            telegram("deleteMessage", {
+                "chat_id": env("TELEGRAM_CHAT_ID"),
+                "message_id": message_id,
+            })
+
+        def write_output(name: str, value: str) -> None:
+            output = env("GITHUB_OUTPUT")
+            if output:
+                with open(output, "a", encoding="utf-8") as handle:
+                    handle.write(f"{name}={value}\n")
+
+        def heartbeat(message_id: str, started_epoch: str) -> None:
+            interval_raw = env("INTERVAL_SECONDS", "10")
+            try:
+                interval = max(1, int(interval_raw))
+            except ValueError:
+                interval = 10
+            stop = False
+
+            def handle_stop(signum, frame):
+                nonlocal stop
+                stop = True
+
+            signal.signal(signal.SIGTERM, handle_stop)
+            signal.signal(signal.SIGINT, handle_stop)
+            while not stop:
+                try:
+                    edit_message(
+                        message_id,
+                        build_text(env("DEPLOY_STAGE"), env("DEPLOY_STATUS", "in_progress"), started_epoch),
+                    )
+                except Exception as exc:
+                    print(f"Telegram heartbeat update failed: {exc}", file=sys.stderr)
+                for _ in range(interval):
+                    if stop:
+                        break
+                    time.sleep(1)
+
+        mode = env("TELEGRAM_MODE")
+        message_id = env("TELEGRAM_MESSAGE_ID")
+        started_epoch = env("STARTED_EPOCH") or str(int(time.time()))
+
+        if mode == "start":
+            text = build_text(env("DEPLOY_STAGE", "Starting deployment"), "in_progress", started_epoch)
+            created_message_id = send_message(text)
+            write_output("message-id", str(created_message_id))
+            write_output("started-epoch", started_epoch)
+        elif mode == "heartbeat":
+            if not message_id:
+                raise SystemExit("Missing message id for heartbeat mode")
+            heartbeat(message_id, started_epoch)
+        elif mode == "update":
+            if not message_id:
+                raise SystemExit("Missing message id for update mode")
+            edit_message(message_id, build_text(env("DEPLOY_STAGE"), env("DEPLOY_STATUS"), started_epoch))
+        elif mode == "delete":
+            if not message_id:
+                raise SystemExit("Missing message id for delete mode")
+            delete_message(message_id)
+        else:
+            raise SystemExit(f"Unsupported Telegram mode: {mode}")
+        PY
+
+        case "$TELEGRAM_MODE" in
+          start|update|delete)
+            python3 "$telegram_script"
+            ;;
+          heartbeat)
+            if [ -z "${TELEGRAM_MESSAGE_ID:-}" ]; then
+              echo "Telegram message id is not available; skipping heartbeat."
+              exit 0
+            fi
+            pid_file="${PID_FILE:-${RUNNER_TEMP}/deploy-telegram-heartbeat.pid}"
+            nohup python3 "$telegram_script" > "${pid_file}.log" 2>&1 &
+            echo "$!" > "$pid_file"
+            ;;
+          stop)
+            pid_file="${PID_FILE:-${RUNNER_TEMP}/deploy-telegram-heartbeat.pid}"
+            if [ -f "$pid_file" ]; then
+              pid="$(cat "$pid_file")"
+              if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+                sleep 1
+                kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+              fi
+              rm -f "$pid_file"
+            fi
+            ;;
+          *)
+            echo "Unsupported Telegram mode: ${TELEGRAM_MODE}"
+            exit 1
+            ;;
+        esac
