@@ -1,65 +1,71 @@
 # GitHub Actions Toolkit
 
-Reusable workflow building blocks for application release pipelines.
+Reusable GitHub Actions workflows for apps deployed through Harbor, Argo CD
+Image Updater, and Argo CD.
 
-## Workflows
+## Harbor ArgoCD App
 
-- `.github/workflows/argocd-app-release.yml` - builds or promotes a container image,
-  publishes it, updates a Kubernetes deployment manifest in a GitOps repository,
-  synchronizes the deployment when Argo CD credentials are provided, waits for
-  the live application health/version check, and sends Telegram release
-  notifications.
-- `.github/workflows/fluxcd-image-release.yml` - builds or promotes a container
-  image, publishes it with a Flux Image Automation-compatible tag, optionally
-  waits for the live health endpoint, and sends Telegram release notifications.
-  It does not edit GitOps manifests directly; FluxCD image automation owns that
-  part.
+Use `.github/workflows/harbor-argocd-app.yml` from application repositories when
+the app:
 
-## Actions
+- builds a Docker image;
+- pushes it to Harbor with tag `sha-<12-char-git-sha>`;
+- lets Argo CD Image Updater write that image tag into the GitOps repository;
+- waits until Argo CD reports the exact pushed image as `Synced` and `Healthy`.
 
-- `.github/actions/notify-telegram` - sends start/final release notifications.
-- `.github/actions/deployment-manifest-update` - updates an image reference and
-  selected environment variables in a Kubernetes deployment manifest.
-- `.github/actions/sync-deployment` - triggers and waits for a deployment sync.
-- `.github/actions/await-live-version` - waits until a health endpoint reports
-  the expected version, or just returns healthy when no version field is set.
-
-## Versioning
-
-Use immutable tags from application repositories, for example:
+Minimal caller workflow:
 
 ```yaml
+name: Build and deploy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: my-app-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
-    uses: anomaly51/github-actions-toolkit/.github/workflows/argocd-app-release.yml@v10
+    uses: anomaly51/github-actions-toolkit/.github/workflows/harbor-argocd-app.yml@main
     with:
-      concurrency-group: my-application
+      app-name: my-argocd-app
+      image-repository: harbor.api-api-api.com/my-project/my-image
+    secrets: inherit
 ```
 
-`concurrency-group` maps directly to GitHub Actions `concurrency.group`.
-Use one stable group per application, for example `architect-business-bot`, so
-newer runs can cancel stale runs for the same app without affecting other
-applications.
+Optional inputs:
 
-Defaults:
+- `runner`: defaults to `arc-runner-set`.
+- `registry`: defaults to `harbor.api-api-api.com`.
+- `build-cache-repository`: shared BuildKit cache repository. The workflow
+  stores one cache tag per GitHub repository, so the same repository can be
+  reused by frontend, backend, and bot pipelines.
+- `buildkit-endpoint`: defaults to the in-cluster remote BuildKit service.
+- `build-context`: defaults to `.`.
+- `dockerfile`: defaults to `Dockerfile`.
+- `platforms`: defaults to `linux/amd64`.
+- `deploy-timeout-seconds`: defaults to `1200`.
+- `deploy-poll-seconds`: defaults to `5`.
+- `argocd-cli-version`: defaults to `v3.4.3`.
+- `build-args`: extra Docker build args, one `KEY=VALUE` per line.
 
-- `gitops-branch` defaults to `main`.
-- `deployment-app-name` defaults to `concurrency-group`.
-- `deployment-container-name` defaults to the first container image in the
-  deployment manifest. Set it only for multi-container deployments.
-- `version-env-name` can be empty when the application does not expose a live
-  deployment version.
-- `health-version-field` can be empty when the workflow should wait for HTTP
-  health only.
-- `source-image-ref` can be set when the release should promote an existing
-  image tag instead of running a local Docker build.
-- `platform` and `smoke-test-command` are optional build checks for images that
-  need a fixed runtime platform or container smoke test before push.
-- `registry-resolve-host` can be set when the runner should bypass public DNS
-  for the registry, for example to push large Harbor layers directly through an
-  in-cluster Traefik service while keeping the public image reference unchanged.
+Expected caller secrets:
 
-FluxCD release workflows use the same `concurrency-group` and image naming
-inputs, but they only publish the image. The tag format is
-`main-<run-number>-<sha>`, which matches Flux image policies using a numerical
-`main-(?P<build>[0-9]+)-.*` filter.
+- Harbor push: `HARBOR_USERNAME`/`HARBOR_PASSWORD` or
+  `HARBOR_PUSH_USERNAME`/`HARBOR_PUSH_PASSWORD`.
+- Argo CD: prefer `ARGOCD_USERNAME` and `ARGOCD_PASSWORD`; `ARGOCD_AUTH_TOKEN`
+  is also supported. `ARGOCD_SERVER` is required.
+- `ARGOCD_INSECURE` is optional and defaults to insecure/grpc-web mode unless
+  set to `false`.
+
+The workflow intentionally verifies the deployed image reference, not just a
+successful build. A run is green only after Argo CD summary images contain the
+same Harbor image digest tag that this run pushed.
