@@ -90,8 +90,8 @@ jobs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       image_ref: ${{ steps.meta.outputs.image_ref }}
       cache_ref: ${{ steps.meta.outputs.cache_ref }}
-      telegram_message_id: ${{ steps.telegram_start.outputs.message-id }}
-      telegram_started_epoch: ${{ steps.telegram_start.outputs.started-epoch }}
+      telegram_message_id: ${{ steps.telegram_start.outputs.message_id }}
+      telegram_started_epoch: ${{ steps.telegram_start.outputs.started_epoch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -129,20 +129,20 @@ jobs:
           ref-name: ${{ github.ref_name }}
 
       - name: Start Telegram build heartbeat
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.telegram_start.outputs.message-id != ''
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.telegram_start.outputs.message_id != ''
         continue-on-error: true
         uses: anomaly51/github-actions-toolkit/.github/actions/deploy-telegram-message@main
         with:
           mode: heartbeat
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          message-id: ${{ steps.telegram_start.outputs.message-id }}
+          message-id: ${{ steps.telegram_start.outputs.message_id }}
           app-name: ${{ inputs.notification-title || inputs.app-name }}
           stage: Building container image
           image-ref: ${{ steps.meta.outputs.image_ref }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ref-name: ${{ github.ref_name }}
-          started-epoch: ${{ steps.telegram_start.outputs.started-epoch }}
+          started-epoch: ${{ steps.telegram_start.outputs.started_epoch }}
           interval-seconds: "10"
           pid-file: ${{ runner.temp }}/telegram-build-heartbeat.pid
 
@@ -223,20 +223,20 @@ jobs:
           pid-file: ${{ runner.temp }}/telegram-build-heartbeat.pid
 
       - name: Update Telegram after image build
-        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.telegram_start.outputs.message-id != ''
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.telegram_start.outputs.message_id != ''
         continue-on-error: true
         uses: anomaly51/github-actions-toolkit/.github/actions/deploy-telegram-message@main
         with:
           mode: update
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          message-id: ${{ steps.telegram_start.outputs.message-id }}
+          message-id: ${{ steps.telegram_start.outputs.message_id }}
           app-name: ${{ inputs.notification-title || inputs.app-name }}
           stage: Image built; waiting for Argo CD deployment
           image-ref: ${{ steps.meta.outputs.image_ref }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ref-name: ${{ github.ref_name }}
-          started-epoch: ${{ steps.telegram_start.outputs.started-epoch }}
+          started-epoch: ${{ steps.telegram_start.outputs.started_epoch }}
 
   verify-deploy:
     name: Verify deploy

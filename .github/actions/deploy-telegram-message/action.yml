@@ -52,10 +52,16 @@ inputs:
 outputs:
   message-id:
     description: Telegram message id created by start mode.
-    value: ${{ steps.telegram.outputs.message-id }}
+    value: ${{ steps.telegram.outputs.message_id }}
+  message_id:
+    description: Telegram message id created by start mode.
+    value: ${{ steps.telegram.outputs.message_id }}
   started-epoch:
     description: Deployment start time as Unix epoch seconds.
-    value: ${{ steps.telegram.outputs.started-epoch }}
+    value: ${{ steps.telegram.outputs.started_epoch }}
+  started_epoch:
+    description: Deployment start time as Unix epoch seconds.
+    value: ${{ steps.telegram.outputs.started_epoch }}
 runs:
   using: composite
   steps:
@@ -221,7 +227,9 @@ runs:
             text = build_text(env("DEPLOY_STAGE", "Starting deployment"), "in_progress", started_epoch)
             created_message_id = send_message(text)
             write_output("message-id", str(created_message_id))
+            write_output("message_id", str(created_message_id))
             write_output("started-epoch", started_epoch)
+            write_output("started_epoch", started_epoch)
         elif mode == "heartbeat":
             if not message_id:
                 raise SystemExit("Missing message id for heartbeat mode")
