@@ -66,13 +66,6 @@ on:
         type: string
         required: false
         default: ""
-    secrets:
-      TELEGRAM_BOT_TOKEN:
-        description: Telegram bot token for deployment notifications.
-        required: false
-      TELEGRAM_CHAT_ID:
-        description: Telegram chat id for deployment notifications.
-        required: false
 
 permissions:
   contents: read
@@ -105,30 +98,6 @@ jobs:
           echo "image_ref=${IMAGE_REPOSITORY}:${image_tag}" >> "$GITHUB_OUTPUT"
           echo "cache_ref=${BUILD_CACHE_REPOSITORY}:${cache_tag}" >> "$GITHUB_OUTPUT"
           echo "build_date=${build_date}" >> "$GITHUB_OUTPUT"
-
-      - name: Notify Telegram deploy started
-        if: github.event_name != 'pull_request'
-        continue-on-error: true
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          APP_NAME: ${{ inputs.app-name }}
-          IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-            echo "Telegram token/chat id are not available; skipping notification."
-            exit 0
-          fi
-          text="🚀 ${APP_NAME} deploy started%0Aimage=${IMAGE_REF}%0Aref=${REF_NAME}%0A${RUN_URL}"
-          curl -fsS \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${text}" \
-            --data-urlencode "disable_web_page_preview=true" >/dev/null
 
       - name: Set up Docker Buildx
         if: github.event_name == 'pull_request'
@@ -309,41 +278,3 @@ jobs:
           echo "Timed out waiting for ${ARGOCD_APPLICATION} to deploy ${IMAGE_REF}"
           timeout 30s argocd app get "$ARGOCD_APPLICATION" -o wide "${argocd_args[@]}" || true
           exit 1
-
-  notify:
-    name: Notify deploy result
-    needs:
-      - image
-      - verify-deploy
-    if: always() && github.event_name != 'pull_request'
-    runs-on: ${{ inputs.runner }}
-    steps:
-      - name: Notify Telegram deploy finished
-        continue-on-error: true
-        shell: bash
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          APP_NAME: ${{ inputs.app-name }}
-          IMAGE_REF: ${{ needs.image.outputs.image_ref }}
-          IMAGE_RESULT: ${{ needs.image.result }}
-          VERIFY_RESULT: ${{ needs.verify-deploy.result }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-            echo "Telegram token/chat id are not available; skipping notification."
-            exit 0
-          fi
-          status="failed"
-          icon="❌"
-          if [ "$IMAGE_RESULT" = "success" ] && [ "$VERIFY_RESULT" = "success" ]; then
-            status="finished"
-            icon="✅"
-          fi
-          text="${icon} ${APP_NAME} deploy ${status}%0Aimage=${IMAGE_REF:-unknown}%0Abuild=${IMAGE_RESULT}%0Averify=${VERIFY_RESULT}%0A${RUN_URL}"
-          curl -fsS \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${text}" \
-            --data-urlencode "disable_web_page_preview=true" >/dev/null
