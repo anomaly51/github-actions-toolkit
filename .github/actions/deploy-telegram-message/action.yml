@@ -143,7 +143,7 @@ runs:
             if stage:
                 lines.append(esc(stage))
             if run_url:
-                lines.extend(["", f'<a href="{esc(run_url)}">GitHub Actions</a>'])
+                lines.extend(["", esc(run_url)])
             return "\n".join(lines)
 
         def telegram(method: str, payload: dict) -> dict:
