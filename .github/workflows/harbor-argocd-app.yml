@@ -72,6 +72,33 @@ on:
         required: false
         default: ""
     secrets:
+      HARBOR_USERNAME:
+        description: Harbor username used to push and inspect images.
+        required: false
+      HARBOR_PASSWORD:
+        description: Harbor password used to push and inspect images.
+        required: false
+      HARBOR_PUSH_USERNAME:
+        description: Backward-compatible Harbor push username.
+        required: false
+      HARBOR_PUSH_PASSWORD:
+        description: Backward-compatible Harbor push password.
+        required: false
+      ARGOCD_SERVER:
+        description: Argo CD server hostname.
+        required: false
+      ARGOCD_AUTH_TOKEN:
+        description: Argo CD auth token used for deployment verification.
+        required: false
+      ARGOCD_USERNAME:
+        description: Argo CD username fallback when no auth token is provided.
+        required: false
+      ARGOCD_PASSWORD:
+        description: Argo CD password fallback when no auth token is provided.
+        required: false
+      ARGOCD_INSECURE:
+        description: Set to false to disable argocd --insecure.
+        required: false
       TELEGRAM_BOT_TOKEN:
         description: Telegram bot token for deployment notifications.
         required: false
